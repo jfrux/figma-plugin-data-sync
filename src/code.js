@@ -5,7 +5,28 @@
 // full browser enviroment (see documentation).
 // This shows the HTML page in "ui.html".
 figma.showUI(__html__);
-
+function clone(val) {
+  const type = typeof val
+  if (val === null) {
+    return null
+  } else if (type === 'undefined' || type === 'number' ||
+             type === 'string' || type === 'boolean') {
+    return val
+  } else if (type === 'object') {
+    if (val instanceof Array) {
+      return val.map(x => clone(x))
+    } else if (val instanceof Uint8Array) {
+      return new Uint8Array(val)
+    } else {
+      let o = {}
+      for (const key in val) {
+        o[key] = clone(val[key])
+      }
+      return o
+    }
+  }
+  throw 'unknown'
+}
 const deepFindByNameAndType = function(node, name, type, foundItems) {
   // console.log("Searching node ",node);
   if (node.children) {
@@ -27,43 +48,59 @@ const deepFindByNameAndType = function(node, name, type, foundItems) {
     }
   }
 }
-const fetchImageBlob = (data) => {
-  figma.ui.postMessage({
-    type: 'fetch-image',
-    data
-  });
+
+function fetchImageBlob(data) {
+    figma.ui.postMessage({
+      type: 'fetch-image',
+      data
+    });
 }
+
 const indexKeysFromSelection = (node, keyIndex) => {
-  node.children.forEach((child) => {
-    
-    if (child.name.indexOf('#') >= 0) {
-      console.log("childName",child.name);
-      console.log("childType",child.type);
-      console.log("------");
-      const name = child.name.replace('#','');
-      if (!keyIndex.hasOwnProperty(name)) {
-        keyIndex[name] = [];
+  if (node.children) {
+    node.children.forEach((child) => {
+      
+      if (child.name.indexOf('#') >= 0) {
+        console.log("childName",child.name);
+        console.log("childType",child.type);
+        console.log("------");
+        const name = child.name.replace('#','');
+        if (!keyIndex.hasOwnProperty(name)) {
+          keyIndex[name] = [];
+        }
+        keyIndex[name].push({
+          id: child.id,
+          type: child.type
+        });
       }
-      keyIndex[name].push({
-        id: child.id,
-        type: child.type
+    });
+
+    const matchingInstance = node.children.filter((item) => {
+      return item.name.indexOf('#') == -1;
+    });
+
+    if (matchingInstance.length) {
+      matchingInstance.forEach((item) => {
+        indexKeysFromSelection(item, keyIndex);
       });
     }
-  });
-
-  const matchingInstance = node.children.filter((item) => {
-    return item.name.indexOf('#') == -1;
-  });
-
-  if (matchingInstance.length) {
-    matchingInstance.forEach((item) => {
-      indexKeysFromSelection(item, keyIndex);
-    });
   }
 }
 const handlers = {
   'image-blob-response': (msg) => {
-    console.log("Response received from msg blob",msg.data);
+    const node = figma.getNodeById(msg.data.id);
+    const newImage = figma.createImage(msg.data.imageBuffer);
+    console.log(node.id);
+    console.log(node.name);
+    console.log(newImage);
+    const fills = clone(node.fills);
+    fills.forEach((fill) => {
+      if (fill.type === 'IMAGE') {
+        fill.imageHash = newImage.hash;
+      }
+    });
+
+    node.fills = fills;
   },
   'new-feed': (msg) => {
     console.log("rawData:",msg.rawData);
@@ -92,6 +129,7 @@ const handlers = {
             console.log(record);
             console.log(indexKey);
             const recordValue = record[indexKey];
+            console.log("recordValue",recordValue);
             if (!recordValue) {
               return;
             }
@@ -126,7 +164,7 @@ const handlers = {
       if (keyArray.length) {
         keyArray.forEach((keyArrayItem) => {
           const node = figma.getNodeById(keyArrayItem.id);
-
+          console.log("Processing node:", node, node.id, node.name);
           if (keyArrayItem.fillType === 'text') {
             figma.loadFontAsync(node.fontName).then(() => {
               node.characters = keyArrayItem.value;
@@ -135,7 +173,7 @@ const handlers = {
           } else if (keyArrayItem.fillType === 'image') {
             // let blob = await fetch(url).then(r => r.blob());
             console.log("Fetch Image Request...");
-            fetchImageBlob(keyArrayItem);
+            fetchImageBlob(clone(keyArrayItem));
           };
         });
       }
@@ -178,7 +216,6 @@ const handlers = {
 // callback. The callback will be passed the "pluginMessage" property of the
 // posted message.
 figma.ui.onmessage = msg => {
-  
     // One way of distinguishing between different types of messages sent from
     // your HTML page is to use an object with a "type" property like this.
     if (msg.type) {
@@ -196,5 +233,8 @@ figma.ui.onmessage = msg => {
     // figma.viewport.scrollAndZoomIntoView(nodes);
     // Make sure to close the plugin when you're done. Otherwise the plugin will
     // keep running, which shows the cancel button at the bottom of the screen.
-    figma.closePlugin();
+    setTimeout(() => {
+      figma.closePlugin();
+    },5000);
+    
 };

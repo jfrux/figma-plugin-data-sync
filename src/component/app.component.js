@@ -12,7 +12,7 @@ const getJson = (url) => {
     console.log("[feedle] Failed to fetch JSON data from " + url,e);
   })
 }
-function startDownload(imageUrl) {
+async function startDownload(imageUrl) {
   console.log("Attempting to download image...", imageUrl);
   return new Promise((resolve,reject) => {
     let downloadedImg = new Image;
@@ -24,63 +24,52 @@ function startDownload(imageUrl) {
     downloadedImg.src = imageUrl;
     console.log("Image:",downloadedImg);
   });
-  
 }
-function getImageAsArrayBuffer(url) {
-  return new Promise((resolve,reject) => {
-  startDownload(url).then((image) => {
-    console.log("Downloaded image:",image);
+async function getImageAsArrayBuffer(url) {
+  const image = await startDownload(url);
+  console.log("image returned:",image);
+  return await new Promise((resolve, reject) => {
     let canvas = document.createElement("canvas");
     let context = canvas.getContext("2d");
-  
     canvas.width = image.width;
     canvas.height = image.height;
-   
-    context.drawImage(image, 0, 0);
-    imageBox.appendChild(canvas);
-   
-    try {
-      localStorage.setItem("saved-image-example", canvas.toDataURL("image/jpeg"));
-    }
-    catch(err) {
-      console.log("Error: " + err);
-    }  
-    console.log("Fetching image " + imageUrl);
+    context.drawImage(image,0,0,image.width,image.height);
+    console.log("Image width:",image.width);
+    console.log("Image height:",image.height);
     
-      canvas.toBlob(function(blob) {
-        console.log(blob);
-        var arrayBufferView = new Uint8Array( blob );
-        // var blob = new Blob( [ arrayBufferView ], { type: "image/jpeg" } );
-        // var urlCreator = window.URL || window.webkitURL;
-        // var imageUrl = urlCreator.createObjectURL( blob );
-        resolve(arrayBufferView);
-      });
+    canvas.toBlob(blob => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(new Uint8Array(reader.result))
+      reader.onerror = () => reject(new Error('Could not read from blob'))
+      reader.readAsArrayBuffer(blob)
     });
   });
 }
 const messageHandlers = {
-  'fetch-image': (data) => {
+  'fetch-image': async (data) => {
     console.log("Received image request",JSON.stringify(data));
-    getImageAsArrayBuffer(data.value).then((data) => {
-      console.log(data);
+    await getImageAsArrayBuffer(data.value).then((arrbuffer) => {
+      console.log(arrbuffer);
       parent.postMessage({ pluginMessage: { 
         type: 'image-blob-response',
-        data
-  }}, '*');
+        data: {
+          ...data,
+          imageBuffer: arrbuffer
+        }
+    }}, '*');
     });
-    
   }
 }
 
-window.onmessage = function(msg) {
-  if (!msg.data.pluginMessage) {
+window.onmessage = async (event) => {
+  if (!event.data.pluginMessage) {
     return;
   }
-  const type = msg.data.pluginMessage.type;
-  const data = msg.data.pluginMessage.data;
+  const type = event.data.pluginMessage.type;
+  const data = event.data.pluginMessage.data;
 
   if (type) {
-    messageHandlers[type](data);
+    await messageHandlers[type](data);
   }
 }
 
@@ -108,11 +97,11 @@ class App extends Component {
         data = rawData;
         dataType = "array";
       } else {
-        if( (typeof A === "object" || typeof A !== 'function') && (A !== null) ) {
-          keys = Object.keys(rawData);
-          data = [rawData];
-          dataType = "object";
-        }
+        // if( (typeof A === "object" || typeof A !== 'function') && (A !== null) ) {
+        //   keys = Object.keys(rawData);
+        //   data = [rawData];
+        //   dataType = "object";
+        // }
       }
       if (keys) {
         parent.postMessage({ pluginMessage: { 
