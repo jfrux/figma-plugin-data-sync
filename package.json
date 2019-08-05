@@ -1,0 +1,57 @@
+{
+  "name": "figma-plugin-feedle",
+  "version": "0.0.1",
+  "description": "A plugin to link JSON-API endpoints to your designs.",
+  "scripts": {
+    "start": "webpack --mode=development --watch",
+    "build": "webpack --mode=production",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jfrux/figma-plugin-feedle.git"
+  },
+  "keywords": [
+    "figma",
+    "plugin",
+    "feedle"
+  ],
+  "author": "jfrux",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jfrux/figma-plugin-feedle/issues"
+  },
+  "babel": {
+    "presets": [
+      "@babel/env",
+      "@babel/react"
+    ],
+    "plugins": [
+      "@babel/plugin-proposal-class-properties"
+    ]
+  },
+  "homepage": "https://github.com/jfrux/figma-plugin-feedle#readme",
+  "devDependencies": {
+    "@babel/core": "^7.5.5",
+    "@babel/plugin-proposal-class-properties": "^7.5.5",
+    "@babel/preset-env": "^7.5.5",
+    "@babel/preset-react": "^7.0.0",
+    "@types/react": "^16.8.24",
+    "@types/react-dom": "^16.8.5",
+    "babel-loader": "^8.0.6",
+    "css-loader": "^3.1.0",
+    "html-webpack-inline-source-plugin": "^0.0.10",
+    "html-webpack-plugin": "^3.2.0",
+    "style-loader": "^0.23.1",
+    "ts-loader": "^6.0.4",
+    "typescript": "^3.5.3",
+    "url-loader": "^2.1.0",
+    "webpack": "^4.39.1",
+    "webpack-cli": "^3.3.6",
+    "webpack-dev-server": "^3.7.2"
+  },
+  "dependencies": {
+    "react": "^16.8.6",
+    "react-dom": "^16.8.6"
+  }
+}

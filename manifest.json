@@ -1,0 +1,7 @@
+{
+  "name": "Feedle",
+  "id": "739113548755296785",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html"
+}
