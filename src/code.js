@@ -5,6 +5,7 @@
 // full browser enviroment (see documentation).
 // This shows the HTML page in "ui.html".
 figma.showUI(__html__);
+
 function clone(val) {
   const type = typeof val
   if (val === null) {
@@ -27,6 +28,7 @@ function clone(val) {
   }
   throw 'unknown'
 }
+
 const deepFindByNameAndType = function(node, name, type, foundItems) {
   // console.log("Searching node ",node);
   if (node.children) {
@@ -35,12 +37,11 @@ const deepFindByNameAndType = function(node, name, type, foundItems) {
         foundItems.push(item);
       }
     });
-    console.log("foundItems:",foundItems);
     
     const matchingInstance = node.children.filter((item) => {
       return item.type !== type;
     });
-    console.log("matchingInstance",matchingInstance);
+
     if (matchingInstance.length) {
       matchingInstance.forEach((item) => {
         deepFindByNameAndType(item, name, type, foundItems);
@@ -61,9 +62,6 @@ const indexKeysFromSelection = (node, keyIndex) => {
     node.children.forEach((child) => {
       
       if (child.name.indexOf('#') >= 0) {
-        console.log("childName",child.name);
-        console.log("childType",child.type);
-        console.log("------");
         const name = child.name.replace('#','');
         if (!keyIndex.hasOwnProperty(name)) {
           keyIndex[name] = [];
@@ -86,14 +84,29 @@ const indexKeysFromSelection = (node, keyIndex) => {
     }
   }
 }
+
 const handlers = {
+  'cancel': (msg) => {
+    figma.closePlugin();
+  },
+  'get-client-variable': (msg) => {
+    const key = msg.data;
+    console.log("Requesting client variable:",key);
+    figma.clientStorage.getAsync(key).then((value) => {
+      figma.ui.postMessage({
+        type: 'receive-client-variable',
+        data: {
+          key,
+          value
+        }
+      });
+    });
+  },
   'image-blob-response': (msg) => {
     const node = figma.getNodeById(msg.data.id);
     const newImage = figma.createImage(msg.data.imageBuffer);
-    console.log(node.id);
-    console.log(node.name);
-    console.log(newImage);
     const fills = clone(node.fills);
+
     fills.forEach((fill) => {
       if (fill.type === 'IMAGE') {
         fill.imageHash = newImage.hash;
@@ -102,17 +115,24 @@ const handlers = {
 
     node.fills = fills;
   },
+
   'new-feed': (msg) => {
-    console.log("rawData:",msg.rawData);
-    console.log("keys:",msg.keys);
-    const { type, keys, rawData, data, dataType } = msg;
+    const { type, keys, rawData, data, dataType, json_url } = msg;
     let currentPage = figma.currentPage;
-    console.log("currentPage:",currentPage);
     let currentSelection = currentPage.selection;
+
+    console.log("data:",data);
+    if (!data) {
+      figma.ui.postMessage({
+        type: 'new-feed-error',
+        data: "No data was found in the response..."
+      });
+    }
     if (!currentSelection) {
       currentSelection = [currentPage]
     }
-    console.log("currentSelection",currentSelection);
+
+    figma.clientStorage.setAsync('last-used-url',json_url);
 
     let keyIndex = {};
     let indexKeys;
@@ -126,10 +146,7 @@ const handlers = {
         const recordKeys = Object.keys(record);
         indexKeys.forEach((indexKey) => {
           if (keyIndex[indexKey][index]) {
-            console.log(record);
-            console.log(indexKey);
             const recordValue = record[indexKey];
-            console.log("recordValue",recordValue);
             if (!recordValue) {
               return;
             }
@@ -154,10 +171,6 @@ const handlers = {
         });
       });
     }
-    // keys.forEach((key) => {
-    //   deepFindByNameAndType(selection, key, 'TEXT', foundItems);
-    // });
-    console.log("keyIndex",keyIndex);
     indexKeys.forEach((indexKey) => {
       const keyArray = keyIndex[indexKey];
 
@@ -178,40 +191,13 @@ const handlers = {
         });
       }
     });
-    // if (foundItems.length) {
     
-    // }
-    // data.forEach((item) => {
-    //   Object.keys(item).forEach((key) => {
-    //       // const figmaElement = figma.getNodeById("#" + key.trim());
-          
-    //   });
-    // });
-    
-
-    
-    
-    // var request = new XMLHttpRequest();
-    // request.open('GET', msg.json_url, true);
-
-    // request.onload = function() {
-    //   if (this.status >= 200 && this.status < 400) {
-    //     // Success!
-    //     var data = JSON.parse(this.response);
-    //     console.log(data);
-    //   } else {
-    //     // We reached our target server, but it returned an error
-
-    //   }
-    // };
-
-    // request.onerror = function() {
-    //   // There was a connection error of some sort
-    // };
-
-    // request.send();
+    setTimeout(() => {
+      figma.closePlugin();
+    },5000);
   }
 }
+
 // Calls to "parent.postMessage" from within the HTML page will trigger this
 // callback. The callback will be passed the "pluginMessage" property of the
 // posted message.
@@ -233,8 +219,5 @@ figma.ui.onmessage = msg => {
     // figma.viewport.scrollAndZoomIntoView(nodes);
     // Make sure to close the plugin when you're done. Otherwise the plugin will
     // keep running, which shows the cancel button at the bottom of the screen.
-    setTimeout(() => {
-      figma.closePlugin();
-    },5000);
     
 };
