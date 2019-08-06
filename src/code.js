@@ -194,10 +194,16 @@ const handlers = {
           const node = figma.getNodeById(keyArrayItem.id);
           console.log("Processing node:", node, node.id, node.name);
           if (keyArrayItem.fillType === 'text') {
-            figma.loadFontAsync(node.fontName).then(() => {
+            if (node.fontName) {
+              figma.loadFontAsync(node.fontName).then(() => {
+                node.characters = keyArrayItem.value;
+                node.name = "#" + indexKey;
+              });
+            } else if (node.characters) {
               node.characters = keyArrayItem.value;
               node.name = "#" + indexKey;
-            });
+            }
+            
           } else if (keyArrayItem.fillType === 'image') {
             // let blob = await fetch(url).then(r => r.blob());
             console.log("Fetch Image Request...");
