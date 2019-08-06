@@ -1,10 +1,7 @@
-// This plugin will open a modal to prompt the user to enter a number, and
-// it will then create that many rectangles on the screen.
-// This file holds the main code for the plugins. It has access to the *document*.
-// You can access browser APIs in the <script> tag inside "ui.html" which has a
-// full browser enviroment (see documentation).
-// This shows the HTML page in "ui.html".
-figma.showUI(__html__);
+figma.showUI(__html__, {
+  width: 600,
+  height: 400
+});
 
 function clone(val) {
   const type = typeof val
@@ -51,10 +48,7 @@ const deepFindByNameAndType = function(node, name, type, foundItems) {
 }
 
 function fetchImageBlob(data) {
-    figma.ui.postMessage({
-      type: 'fetch-image',
-      data
-    });
+    sendMessage('fetch-image', data);
 }
 
 const indexKeysFromSelection = (node, keyIndex) => {
@@ -84,27 +78,52 @@ const indexKeysFromSelection = (node, keyIndex) => {
     }
   }
 }
+const clientVariables = [
+  ['lastUsedUrl',''],
+  ['json_url',''],
+  ['lastUsedText',''],
+  ['csv_text',''],
+  ['csv_header',false],
+  ['json_text',''],
+  ['activeTab','json']
+];
+
+
 
 const handlers = {
   'cancel': (msg) => {
     figma.closePlugin();
   },
-  'get-client-variable': (msg) => {
-    const key = msg.data;
-    console.log("Requesting client variable:",key);
-    figma.clientStorage.getAsync(key).then((value) => {
-      figma.ui.postMessage({
-        type: 'receive-client-variable',
-        data: {
-          key,
-          value
-        }
-      });
+  'set-client-variables': (payload) => {
+    const keys = Object.keys(payload);
+    keys.forEach((key) => {
+      let value = payload[key];
+      figma.clientStorage.setAsync(key,value);
     });
   },
-  'image-blob-response': (msg) => {
-    const node = figma.getNodeById(msg.data.id);
-    const newImage = figma.createImage(msg.data.imageBuffer);
+  'get-client-variables': () => {
+    console.log("Requesting client variables");
+    Promise.all(clientVariables.map((variable) => {
+      let key = variable[0];
+      let defaultValue = variable[1];
+      return figma.clientStorage.getAsync(key).then((value) => {
+        if (!value) {
+          value = variable[1];
+        }
+        return { key, value };
+      });
+    })).then((results) => {
+      let resultObj = {};
+      console.log("Sending client variables to UI",results);
+      results.forEach((result) => {
+        resultObj[result.key] = result.value;
+      });
+      sendMessage('receive-client-variables',resultObj);
+    });
+  },
+  'image-blob-response': (payload) => {
+    const node = figma.getNodeById(payload.id);
+    const newImage = figma.createImage(payload.imageBuffer);
     const fills = clone(node.fills);
 
     fills.forEach((fill) => {
@@ -116,23 +135,18 @@ const handlers = {
     node.fills = fills;
   },
 
-  'new-feed': (msg) => {
-    const { type, keys, rawData, data, dataType, json_url } = msg;
+  'sync': (payload) => {
+    const { type, keys, rawData, data, dataType, json_url } = payload;
     let currentPage = figma.currentPage;
     let currentSelection = currentPage.selection;
 
-    console.log("data:",data);
     if (!data) {
-      figma.ui.postMessage({
-        type: 'new-feed-error',
-        data: "No data was found in the response..."
-      });
+      sendMessage('sync-error','No data was found in the response...');
     }
     if (!currentSelection) {
       currentSelection = [currentPage]
     }
 
-    figma.clientStorage.setAsync('last-used-url',json_url);
 
     let keyIndex = {};
     let indexKeys;
@@ -171,6 +185,7 @@ const handlers = {
         });
       });
     }
+
     indexKeys.forEach((indexKey) => {
       const keyArray = keyIndex[indexKey];
 
@@ -198,26 +213,23 @@ const handlers = {
   }
 }
 
-// Calls to "parent.postMessage" from within the HTML page will trigger this
-// callback. The callback will be passed the "pluginMessage" property of the
-// posted message.
-figma.ui.onmessage = msg => {
-    // One way of distinguishing between different types of messages sent from
-    // your HTML page is to use an object with a "type" property like this.
-    if (msg.type) {
-      handlers[msg.type](msg);
-    }
-    // const nodes = [];
-    // for (let i = 0; i < ; i++) {
-    //     const rect = figma.createRectangle();
-    //     rect.x = i * 150;
-    //     rect.fills = [{ type: 'SOLID', color: { r: 1, g: 0.5, b: 0 } }];
-    //     figma.currentPage.appendChild(rect);
-    //     nodes.push(rect);
-    // }
-    // figma.currentPage.selection = nodes;
-    // figma.viewport.scrollAndZoomIntoView(nodes);
-    // Make sure to close the plugin when you're done. Otherwise the plugin will
-    // keep running, which shows the cancel button at the bottom of the screen.
-    
-};
+const receiveMessage = (event) => {
+  const { type, payload } = event;
+  if (!type) {
+    return;
+  }
+  console.log(`[app] Receive message`, type, payload);
+  if (type) {
+    handlers[type](payload);
+  }
+}
+
+const sendMessage = (type,payload = null) => {
+  console.log(`[app] Send message`, type, payload);
+  figma.ui.postMessage({
+    type,
+    payload
+  });
+}
+
+figma.ui.onmessage = receiveMessage;

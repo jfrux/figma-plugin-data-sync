@@ -1,86 +1,106 @@
 import React, { Component } from "react";
-import s from "./app.component.css";
-
+import classnames from 'classnames';
+import PapaParse from 'papaparse'
+import { Form, Input, Radio, TabContent,Label, Spinner, TabPane, Layout, FormGroup, Nav, NavItem, NavLink, Card, Button, CardTitle, CardText, Container, Row, Col } from 'reactstrap';
+// const TextArea = Input.TextArea;
+// const { TabPane } = Tabs;
+// const { Header, Footer, Sider, Content } = Layout;
 class App extends Component {
   constructor() {
     super();
 
     this.state = {
+      'mode': null,
+      'json_url': '',
+      'json_text': '',
+      'csv_text': '',
+      'csv_header': false,
       'processing': false,
-      'last-used-url': null,
+      'lastUsedText': null,
+      'lastUsedUrl': null,
+      'loading': true,
+      'activeTab': 'json',
       'error': null
     };
-    window.onmessage = async (event) => {
-      if (!event.data.pluginMessage) {
-        return;
-      }
-      const type = event.data.pluginMessage.type;
-      const data = event.data.pluginMessage.data;
-    
-      if (type) {
-        await this.messageHandlers[type](data);
-      }
-    }
-    this.getClientVariable('last-used-url');
+    window.onmessage = this.receiveMessage;
+    this.getClientVariables();
   }
-  getClientVariable = (key) => {
+  log(msg,...props) {
+    console.log("[feedle] ", msg, ...props);
+  }
+
+  receiveMessage = (event) => {
+    this.log("onmessage");
+    if (!event.data.pluginMessage) {
+      return;
+    }
+    const messageType = event.data.pluginMessage.type;
+    const messageData = event.data.pluginMessage.payload;
+    this.log("Received message", messageType, messageData)
+    if (messageType) {
+      this.messageHandlers[messageType](messageData);
+    }
+  }
+
+  sendMessage = (type,payload = null) => {
+    this.log("Sending message", type, payload)
     parent.postMessage({ pluginMessage: { 
-      type: 'get-client-variable',
-      data: key
-  }}, '*');
+      type,
+      payload
+    }}, '*');
+  }
+  getClientVariables = () => {
+    this.sendMessage('get-client-variables');
   }
   messageHandlers = {
-    'new-feed-error': async (data)  => {
+    'sync-error': async (data)  => {
       this.setState({
         'error': data
       });
     },
-    'receive-client-variable': async (data) => {
-      console.log(`Received client variable for ${data.key}=${data.value}`)
+    'receive-client-variables': async (data) => {
+      this.log(`Received client variables`,data);
+
       this.setState({
-        [data.key]: data.value
+        ...data,
+        loading:false
       });
     },
     'fetch-image': async (data) => {
-      // console.log("Received image request",JSON.stringify(data));
       await this.getImageAsArrayBuffer(data.value).then((arrbuffer) => {
-        // console.log(arrbuffer);
-        parent.postMessage({ pluginMessage: { 
-          type: 'image-blob-response',
-          data: {
-            ...data,
-            imageBuffer: arrbuffer
-          }
-      }}, '*');
+        this.sendMessage('image-blob-response',{
+          ...data,
+          imageBuffer: arrbuffer
+        });
       });
     }
   }
   
   startDownload = async (imageUrl) => {
-    // console.log("Attempting to download image...", imageUrl);
+    // this.log("Attempting to download image...", imageUrl);
     return new Promise((resolve,reject) => {
       let downloadedImg = new Image;
       downloadedImg.crossOrigin = "Anonymous";
       downloadedImg.addEventListener("load", () => {
-        // console.log("Downloaded image:",downloadedImg);
+        // this.log("Downloaded image:",downloadedImg);
         resolve(downloadedImg);
       }, false);
       downloadedImg.src = imageUrl;
-      // console.log("Image:",downloadedImg);
+      // this.log("Image:",downloadedImg);
     });
   }
   
   getImageAsArrayBuffer = async (url) => {
     const image = await this.startDownload(url);
-    // console.log("image returned:",image);
+    // this.log("image returned:",image);
     return await new Promise((resolve, reject) => {
       let canvas = document.createElement("canvas");
       let context = canvas.getContext("2d");
       canvas.width = image.width;
       canvas.height = image.height;
       context.drawImage(image,0,0,image.width,image.height);
-      // console.log("Image width:",image.width);
-      // console.log("Image height:",image.height);
+      // this.log("Image width:",image.width);
+      // this.log("Image height:",image.height);
       
       canvas.toBlob(blob => {
         const reader = new FileReader()
@@ -92,10 +112,10 @@ class App extends Component {
   }
 
   getJson = (url) => {
-    // console.log("[feedle] Requesting JSON data from " + url);
+    // this.log("[feedle] Requesting JSON data from " + url);
     return fetch(url).then((resp) => {
-      console.log("[feedle] Response",resp);
-      if (resp.status !== '200') {
+      this.log("[feedle] Response",resp);
+      if (resp.status !== 200) {
         this.setState({
           'error': 'Could not extract any data from the JSON response... ensure your server is returning a 200 status message, has CORS enabled, and doesn\'t require authentication.'
         });
@@ -110,46 +130,93 @@ class App extends Component {
       return data;
     })
   }
-
-  onContinue = () => {
-    const textbox = document.getElementById('json_url');
-    const json_url = textbox.value;
-    let keys = {};
-    let data;
-    let dataType = "array";
+  sendData = (data) => {
+    let keys, dataType;
+    this.log("sendData",data);
+    this.sendMessage('set-client-variables', this.state);
+    if (Array.isArray(data)) {
+      this.log("Data is array... grab first row for key map");
+      keys = Object.keys(data[0]);
+      // data = data;
+      dataType = "array";
+    } else {
+      this.log("Data is object... converting to array");
+      if( (typeof A === "object" || typeof A !== 'function') && (A !== null) ) {
+        keys = Object.keys(data);
+        data = [data];
+        dataType = "object";
+      }
+    }
+    this.log(keys);
+    if (keys) {
+      this.sendMessage('sync',{
+        keys,
+        dataType,
+        rawData: data,
+        data
+      });
+    } else {
+      this.setState({
+        'processing': false,
+        'error': 'Could not find any keys to map within response...\n Ensure response is basic JSON Array containing records of JSON Objects with same key-value pairs or Single Object of Key/Values'
+      });
+    }
+  }
+  onSubmitCSV = (event) => {
+    event.preventDefault();
+    let csv_text = this.state.csv_text;
+    this.log("Submitted CSV",csv_text);
     this.setState({
       'error': null,
       'processing': true
     });
+    const parsedResult = PapaParse.parse(csv_text, {
+      header: true
+    });
+
+    if (parsedResult.errors.length > 0) {
+      this.setState({
+        'error': 'Failed to parse CSV text...'
+      });
+      return;
+    }
+    this.log("parsedResult",parsedResult);
+
+    this.sendData(parsedResult.data);
+  }
+  onSubmitText = (event) => {
+    event.preventDefault();
+    let json_text = this.state.json_text;
+    this.setState({
+      'error': null,
+      'processing': true
+    });
+    try {
+      let json = JSON.parse(json_text);
+      console.log(this.state);
+      this.sendData(json);
+    } catch (e) {
+      this.setState({
+        'error': 'Failed to parse JSON text...'
+      });
+    }
+  }
+  onSubmitUrl = (event) => {
+    event.preventDefault();
+    const { activeTab, json_url } = this.state;
+    
+    let keys = {};
+    let data;
+    let dataType = "array";
+
+    this.setState({
+      'error': null,
+      'processing': true
+    });
+
     this.getJson(json_url).then((rawData) => {
-      // console.log("getJson response:",rawData);
-      if (Array.isArray(rawData)) {
-        // console.log("Data is array... grab first row for key map");
-        keys = Object.keys(rawData[0]);
-        data = rawData;
-        dataType = "array";
-      } else {
-        // if( (typeof A === "object" || typeof A !== 'function') && (A !== null) ) {
-        //   keys = Object.keys(rawData);
-        //   data = [rawData];
-        //   dataType = "object";
-        // }
-      }
-      if (keys) {
-        parent.postMessage({ pluginMessage: { 
-          type: 'new-feed', 
-          keys,
-          dataType,
-          data,
-          json_url,
-          rawData
-        } }, '*')
-      } else {
-        this.setState({
-          'processing': false,
-          'error': 'Could not find any keys to map within response...\n Ensure response is basic JSON Array containing records of JSON Objects with same key-value pairs or Single Object of Key/Values'
-        });
-      }
+      // this.log("getJson response:",rawData);
+      this.sendData(rawData);
     }).catch((e) => {
       this.setState({
         'processing': false,
@@ -159,26 +226,78 @@ class App extends Component {
   }
 
   onCancel = () => {
-    parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*')
+    this.sendMessage('cancel');
+  }
+
+  onTabChange = activeTab => {
+    this.log("Changing tab to ", activeTab);
+    this.setState({ activeTab });
+  }
+
+  handleChange = (event) => {
+    this.setState({[event.target.id]: event.target.value});
   }
 
   render() {
-    const lastUsedUrl = this.state['last-used-url'];
-    const { processing, error } = this.state;
+    const { activeTab, loading, lastUsedText, lastUsedUrl, processing, error, mode } = this.state;
     
-    if (processing) {
-      return (<div className="loading">Processing... Please wait...</div>);
+    if (processing || loading) {
+      return (<div className="loading"><Spinner color="primary" style={{ width: '3rem', height: '3rem' }} /></div>);
     }
 
     return (
-      <div>
-        {error && 
-          <div className="error">{error}</div>
-        }
-        <input type="text" name="json_url" id="json_url" defaultValue={lastUsedUrl} placeholder="https://api.example.com/data.json" />
-        <button type="button" name="continue" id="continue-btn" onClick={this.onContinue}>Continue</button>
-        <button type="button" name="cancel" id="cancel-btn" onClick={this.onCancel}>Cancel</button>
-      </div>
+      <Container>
+        <Nav pills className={'no-select'}>
+          <NavItem>
+            <NavLink className={classnames({ active: activeTab === 'json' })}
+              onClick={() => { this.onTabChange('json'); }}>From Text</NavLink>
+          </NavItem>
+          <NavItem>
+            <NavLink className={classnames({ active: activeTab === 'json_url' })}
+              onClick={() => { this.onTabChange('json_url'); }}>From URL</NavLink>
+          </NavItem>
+          <NavItem>
+            <NavLink className={classnames({ active: activeTab === 'csv_text' })}
+              onClick={() => { this.onTabChange('csv_text'); }}>From CSV</NavLink>
+          </NavItem>
+        </Nav>
+        <TabContent activeTab={activeTab}>
+          <TabPane tabId="json">
+            <Form onSubmit={this.onSubmitText}>
+              <FormGroup>
+                <Input type="textarea" onChange={this.handleChange} value={this.state.json_text} placeholder="Paste your JSON structure" name="json_text" id="json_text" rows={6} />
+              </FormGroup>
+
+              <Button>Synchronize</Button>
+            </Form>
+          </TabPane>
+          <TabPane tabId="json_url">
+            {error && 
+              <div className="error">{error}</div>
+            }
+            
+            <Form onSubmit={this.onSubmitUrl}>
+              <FormGroup>
+                <Input type="text" name="json_url" id="json_url" onChange={this.handleChange} value={this.state.json_url} placeholder="https://api.example.com/data.json" />
+              </FormGroup>
+              <Button>Synchronize</Button>
+            </Form>
+          </TabPane>
+          <TabPane tabId="csv_text">
+            {error && 
+              <div className="error">{error}</div>
+            }
+            
+            <Form onSubmit={this.onSubmitCSV}>
+              <FormGroup>
+                <Input type="textarea" name="csv_text" id="csv_text" onChange={this.handleChange} value={this.state.csv_text} placeholder="Paste your CSV content" />
+              </FormGroup>
+              <div>Note: You must include a header row for it to properly map fields.</div>
+              <Button>Synchronize</Button>
+            </Form>
+          </TabPane>
+        </TabContent>
+      </Container>
     );
   }
 }
