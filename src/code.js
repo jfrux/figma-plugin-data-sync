@@ -1,3 +1,6 @@
+
+import defaultState from './constants/default-state.js';
+
 figma.showUI(__html__, {
   width: 600,
   height: 400
@@ -47,8 +50,8 @@ const deepFindByNameAndType = function(node, name, type, foundItems) {
   }
 }
 
-function fetchImageBlob(data) {
-    sendMessage('fetch-image', data);
+async function fetchImageBlob(data) {
+  sendMessage('fetch-image', data);
 }
 
 const indexKeysFromSelection = (node, keyIndex) => {
@@ -78,17 +81,58 @@ const indexKeysFromSelection = (node, keyIndex) => {
     }
   }
 }
-const clientVariables = [
-  ['lastUsedUrl',''],
-  ['json_url',''],
-  ['lastUsedText',''],
-  ['csv_text',''],
-  ['csv_header',false],
-  ['json_text',''],
-  ['activeTab','json']
-];
 
+const getPersistedStorage = async () => {
+  console.log("[data-sync-plugin] Retrieving persisted client storage.");
+  const stateKeys = Object.keys(defaultState);
+  let stateObj = {};
+  const results = await Promise.all(stateKeys.map(async (stateKey) => {
+    let defaultValue = defaultState[stateKey];
+    let value = await figma.clientStorage.getAsync(stateKey);
+    if (!value) {
+      value = defaultValue;
+    }
+    return { stateKey, value };
+  }))
+  results.forEach((result) => {
+    stateObj[result.stateKey] = result.value;
+  })
+  return stateObj;
+}
 
+const getCurrentSelection = () => {
+  let currentPage = figma.currentPage;
+  let selectionType = 'items';
+  let currentSelection = currentPage.selection;
+  console.log("Current Page:",currentPage);
+  console.log("Current Selection:",currentSelection);
+  if (!currentSelection.length) {
+    selectionType = 'page'
+    currentSelection = [currentPage]
+  }
+
+  figma.clientStorage.setAsync('currentSelectionType',selectionType);
+  figma.clientStorage.setAsync('currentSelection',currentSelection);
+  return currentSelection;
+}
+
+const getIndexedSelection = (currentSelection) => {
+  let keyIndex = {};
+  currentSelection.forEach((selection) => {
+    indexKeysFromSelection(selection,keyIndex);
+  });
+  const keys = Object.keys(keyIndex);
+
+  if (keys.length > 0) {
+    console.log("[data-sync-plugin] Found items in selection that are mappable.");
+    figma.clientStorage.setAsync('currentSelectionIndex',keyIndex);
+    return keyIndex;
+  } else {
+    console.log("[data-sync-plugin] Nothing usable in selection...");
+    figma.clientStorage.setAsync('currentSelectionIndex',null);
+    return;
+  }
+}
 
 const handlers = {
   'cancel': (msg) => {
@@ -101,25 +145,14 @@ const handlers = {
       figma.clientStorage.setAsync(key,value);
     });
   },
-  'get-client-variables': () => {
-    console.log("Requesting client variables");
-    Promise.all(clientVariables.map((variable) => {
-      let key = variable[0];
-      let defaultValue = variable[1];
-      return figma.clientStorage.getAsync(key).then((value) => {
-        if (!value) {
-          value = variable[1];
-        }
-        return { key, value };
-      });
-    })).then((results) => {
-      let resultObj = {};
-      console.log("Sending client variables to UI",results);
-      results.forEach((result) => {
-        resultObj[result.key] = result.value;
-      });
-      sendMessage('receive-client-variables',resultObj);
-    });
+  'get-persisted-state': async () => {
+    const currentSelection = getCurrentSelection();
+    const keyIndex = getIndexedSelection(currentSelection);
+    const resultObj = await getPersistedStorage();
+    
+    console.log("Sending client variables to UI",resultObj);
+    
+    sendMessage('receive-persisted-state',resultObj);
   },
   'image-blob-response': (payload) => {
     const node = figma.getNodeById(payload.id);
@@ -135,26 +168,21 @@ const handlers = {
     node.fills = fills;
   },
 
-  'sync': (payload) => {
-    const { type, keys, rawData, data, dataType, json_url } = payload;
-    let currentPage = figma.currentPage;
-    let currentSelection = currentPage.selection;
+  'sync': async (payload) => {
+    const { type, keys, rawData, data, dataType, jsonUrl } = payload;
+
+    const currentSelection = getCurrentSelection();
 
     if (!data) {
       sendMessage('sync-error','No data was found in the response...');
     }
-    if (!currentSelection) {
-      currentSelection = [currentPage]
-    }
 
-
-    let keyIndex = {};
     let indexKeys;
-    currentSelection.forEach((selection) => {
-      indexKeysFromSelection(selection,keyIndex);
-    });
+
+    let keyIndex = getIndexedSelection(currentSelection);
     
     indexKeys = Object.keys(keyIndex);
+
     if (indexKeys.length) {
       data.forEach((record,index) => {
         const recordKeys = Object.keys(record);
@@ -191,47 +219,48 @@ const handlers = {
 
       if (keyArray.length) {
         keyArray.forEach((keyArrayItem) => {
-          const node = figma.getNodeById(keyArrayItem.id);
-          console.log("Processing node:", node, node.id, node.name);
-          if (keyArrayItem.fillType === 'text') {
-            if (node.fontName) {
-              figma.loadFontAsync(node.fontName).then(() => {
-                node.characters = keyArrayItem.value;
-                node.name = "#" + indexKey;
-              });
-            } else if (node.characters) {
-              node.characters = keyArrayItem.value;
-              node.name = "#" + indexKey;
-            }
-            
-          } else if (keyArrayItem.fillType === 'image') {
-            // let blob = await fetch(url).then(r => r.blob());
-            console.log("Fetch Image Request...");
-            fetchImageBlob(clone(keyArrayItem));
-          };
+          
         });
       }
     });
     
-    setTimeout(() => {
-      figma.closePlugin();
-    },5000);
+    // setTimeout(() => {
+    //   figma.closePlugin();
+    // },5000);
   }
 }
-
+const handleKeyArrayItem = async (keyArrayItem) => {
+  const node = figma.getNodeById(keyArrayItem.id);
+  console.log("Processing node:", node, node.id, node.name);
+  if (keyArrayItem.fillType === 'text') {
+    if (node.fontName) {
+      await figma.loadFontAsync(node.fontName).then(() => {
+        node.characters = keyArrayItem.value;
+        node.name = "#" + indexKey;
+      });
+    } else if (node.characters) {
+      node.characters = keyArrayItem.value;
+      node.name = "#" + indexKey;
+    }
+  } else if (keyArrayItem.fillType === 'image') {
+    // let blob = await fetch(url).then(r => r.blob());
+    console.log("Fetch Image Request...");
+    await fetchImageBlob(clone(keyArrayItem));
+  };
+}
 const receiveMessage = (event) => {
   const { type, payload } = event;
   if (!type) {
     return;
   }
-  console.log(`[app] Receive message`, type, payload);
+  console.log(`[data-sync-plugin] Receive message`, type, payload);
   if (type) {
     handlers[type](payload);
   }
 }
 
 const sendMessage = (type,payload = null) => {
-  console.log(`[app] Send message`, type, payload);
+  console.log(`[data-sync-plugin] Send message`, type, payload);
   figma.ui.postMessage({
     type,
     payload
